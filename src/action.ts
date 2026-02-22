@@ -1,4 +1,5 @@
 import main from "./main.ts";
+import textMain from "./textMain.ts";
 import settings from "./settings.ts";
 import * as core from "@actions/core";
 
@@ -29,8 +30,19 @@ if (isNaN(year)) {
 core.notice(`start backing up ${from.year}/${from.month}`);
 const to = from.add({ months: 1 });
 
-main(false, new Date(from.epochMilliseconds), new Date(to.epochMilliseconds))
-  .catch((e) => {
-    console.error(e);
-    core.setFailed(`Action failed with error ${e}`);
-  });
+const fromDate = new Date(from.epochMilliseconds);
+const toDate = new Date(to.epochMilliseconds);
+const format = settings.format;
+if (format !== "json" && format !== "markdown" && format !== "gsheet") {
+  core.setFailed(`Invalid format "${format}". Use json, markdown, or gsheet.`);
+  Deno.exit(1);
+}
+
+const run = format === "json" || format === "markdown"
+  ? textMain(format, fromDate, toDate)
+  : main(false, fromDate, toDate);
+
+run.catch((e) => {
+  console.error(e);
+  core.setFailed(`Action failed with error ${e}`);
+});
