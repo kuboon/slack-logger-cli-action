@@ -39,7 +39,7 @@ runs:
   using: composite
   steps:
     - name: Setup Deno
-      uses: denoland/setup-deno@27e0043effb637fb8409496e05bd8472e4b87554 #v2.0.2
+      uses: denoland/setup-deno@e95548e56dfa95d4e1a28d6f422fafe75c4c26fb #v2.0.3
       with:
         deno-version: v2.x
     - name: Deno Run
