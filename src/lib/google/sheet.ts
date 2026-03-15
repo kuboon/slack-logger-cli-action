@@ -1,7 +1,8 @@
 import auth from "./auth.ts";
-import { CellVal } from "../types.ts";
+import { CellVal, MsgJson } from "../types.ts";
 import { Timestamp } from "../timestamp.ts";
 import { ObjError } from "../objError.ts";
+import settings from "../../settings.ts";
 
 //import * as gsheets from "@googleapis/sheets";
 //import * as gdrive  from "@googleapis/drive";
@@ -14,6 +15,18 @@ const sheets = google.sheets({ version: "v4", auth });
 const drive = google.drive({ version: "v3", auth });
 
 export { sheets_v4 };
+
+export function jsonToRow(json: MsgJson): sheets_v4.Schema$RowData {
+  return {
+    values: [
+      formattedCell(json.threadMark),
+      formattedCell(json.timestamp, settings.tz),
+      formattedCell(json.username),
+      formattedCell(json.text),
+      formattedCell(json.rest),
+    ],
+  };
+}
 
 export function formattedCell(
   c: CellVal,

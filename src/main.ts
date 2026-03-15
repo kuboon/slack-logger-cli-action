@@ -1,11 +1,11 @@
 Deno.env.set("TZ", "UTC");
 import settings from "./settings.ts";
 import { StatusFile } from "./lib/statusFile.ts";
-import { BatchBuilder } from "./lib/batchBuilder.ts";
-import { historyIt, Message, MessageProcessor } from "./lib/slack.ts";
+import { BatchBuilder } from "./lib/google/batchBuilder.ts";
+import { channelsIt, historyIt, MessageProcessor, msgToJson } from "./core.ts";
 import { Timestamp } from "./lib/timestamp.ts";
-import { formattedCell, sheets_v4 } from "./lib/google/sheet.ts";
-import { ObjError } from "./lib/objError.ts";
+import { jsonToRow } from "./lib/google/sheet.ts";
+import { prepareChannelSheets, prepareWorkSheet } from "./lib/google/prepare.ts";
 
 const sleep = (msec: number) => new Promise((ok) => setTimeout(ok, msec));
 
@@ -13,26 +13,6 @@ const sleep = (msec: number) => new Promise((ok) => setTimeout(ok, msec));
 async function print(input: string | Uint8Array, to = Deno.stdout) {
   const stream = new Blob([input]).stream();
   await stream.pipeTo(to.writable, { preventClose: true });
-}
-
-function msgToRow(msg: Message, p: MessageProcessor) {
-  const { ts, user, text, ...rest } = msg;
-  const threadMark = msg.reply_count ? "+" : msg.parent_user_id ? ">" : "";
-
-  try {
-    const row: sheets_v4.Schema$RowData = {
-      values: [
-        formattedCell(threadMark),
-        formattedCell(Timestamp.fromSlack(ts!)!, settings.tz),
-        formattedCell(p.username(user) || rest.username || ""),
-        formattedCell(p.readable(text) || rest.attachments?.[0].fallback || ""),
-        formattedCell(JSON.stringify(rest)),
-      ],
-    };
-    return row;
-  } catch (e) {
-    ObjError.throw(`${ts} ${user} ${text}`, e);
-  }
 }
 
 async function* ahead<T>(
@@ -45,6 +25,7 @@ async function* ahead<T>(
   }
   yield { msg };
 }
+
 export default async function main(
   append = false,
   oldest_: Date,
@@ -52,15 +33,33 @@ export default async function main(
 ) {
   const oldest = new Timestamp(oldest_);
   const latest = new Timestamp(latest_);
+
   const file = new StatusFile();
-  const { gSheet } = await file.prepare(append, oldest);
-  await file.save();
+  if (append) file.load();
+
+  const gSheet = await prepareWorkSheet(
+    file.status.gSheetId,
+    oldest.date(settings.tz),
+  );
   console.log("https://docs.google.com/spreadsheets/d/" + gSheet.id);
+
+  const channelList: Array<{ name: string; id: string }> = [];
+  for await (const c of channelsIt()) {
+    channelList.push({ name: c.name!, id: c.id! });
+  }
+
+  const channels = await prepareChannelSheets(gSheet, oldest.slack(), channelList);
+  if (append) {
+    for (const s of channels) {
+      const cs = file.status.channels.find((x) => x.channel_id === s.channel_id);
+      if (cs) s.ts = cs.ts;
+    }
+  }
 
   const builder = new BatchBuilder();
   const messageProcessor = await new MessageProcessor().asyncInit();
-  const tsRecord: Record<string, string> = {};
-  async function flushAndSave() {
+
+  async function flush() {
     const batches = builder.flush();
     if (batches.length == 0) return;
     await gSheet.batchUpdate(batches).catch((e) => {
@@ -69,13 +68,9 @@ export default async function main(
         Deno.exit(1);
       } else throw e;
     });
-    for (const id in tsRecord) {
-      const c = file.status.channels.find((x) => x.channel_id == id)!;
-      c.ts = tsRecord[id];
-    }
-    await file.save();
   }
-  for await (const c of file.status.channels) {
+
+  for await (const c of channels) {
     console.log(c.name);
     builder.setSheetId(c.sheetId!);
     for await (
@@ -88,15 +83,12 @@ export default async function main(
         await print(" x");
         break;
       }
-      const row = msgToRow(msg, messageProcessor);
+      const json = msgToJson(msg, messageProcessor);
+      const row = jsonToRow(json);
       const estimate = builder.push(row);
-      if (!next) {
-        tsRecord[c.channel_id] = msg.ts!;
-      }
       if (estimate > 10000 && (!next || !next.parent_user_id)) {
         await print(".");
-        tsRecord[c.channel_id] = msg.ts!;
-        await flushAndSave();
+        await flush();
 
         // https://developers.google.com/sheets/api/reference/limits
         await sleep(1000);
@@ -104,5 +96,5 @@ export default async function main(
     }
     console.log("");
   }
-  await flushAndSave();
+  await flush();
 }

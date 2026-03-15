@@ -1,15 +1,17 @@
-import { sheets_v4 } from "./google/sheet.ts";
+import { sheets_v4 } from "./sheet.ts";
 
 export class BatchBuilder {
   batches: sheets_v4.Schema$Request[] = [];
   rows: sheets_v4.Schema$RowData[] = [];
   estimate = 0;
   sheetId: number = 0;
+
   push(row: sheets_v4.Schema$RowData) {
     this.rows.push(row);
     this.estimate += JSON.stringify(row).length + 3;
     return this.estimate;
   }
+
   pushDeleteSheet() {
     this.batches.push({
       deleteSheet: {
@@ -17,6 +19,7 @@ export class BatchBuilder {
       },
     });
   }
+
   setSheetId(sheetId: number) {
     if (this.rows.length > 0) {
       const req: sheets_v4.Schema$Request = {
@@ -42,6 +45,7 @@ export class BatchBuilder {
     });
     this.estimate += 500;
   }
+
   flush() {
     if (this.rows.length > 0) {
       const req: sheets_v4.Schema$Request = {
