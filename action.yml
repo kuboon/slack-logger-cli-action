@@ -1,22 +1,22 @@
 name: "gsheet-slack-logger"
-description: "Get your slack log and generate google sheet"
+description: "Get your slack log and generate google sheet or markdown"
 author: "kuboon"
 inputs:
   slackToken:
     required: true
     description: "slack bot token with required scopes"
   googleClientEmail:
-    required: true
+    required: false
     description: "email of google service account"
   googlePrivateKey:
-    required: true
+    required: false
     description: "private_key for google service account"
   timezone:
     required: true
     description: "your current timezone"
     default: "Asia/Tokyo"
   folderId:
-    required: true
+    required: false
     description: "google drive folder id"
   year:
     required: false
@@ -31,6 +31,14 @@ inputs:
   skipChannels:
     required: false
     description: Array of channel id which should skip
+  outGsheet:
+    required: false
+    description: "output to google sheet"
+    default: "true"
+  outMarkdown:
+    required: false
+    description: "output to markdown"
+    default: "false"
 runs:
   using: composite
   steps:
@@ -51,3 +59,5 @@ runs:
         INPUT_MONTH: ${{ inputs.month }}
         INPUT_AUTOJOIN: ${{ inputs.autoJoin }}
         INPUT_SKIPCHANNELS: ${{ inputs.skipChannels }}
+        INPUT_OUTGSHEET: ${{ inputs.outGsheet }}
+        INPUT_OUTMARKDOWN: ${{ inputs.outMarkdown }}
