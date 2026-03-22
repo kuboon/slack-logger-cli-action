@@ -15,7 +15,7 @@ inputs:
     required: true
     description: "your current timezone"
     default: "Asia/Tokyo"
-  folderId:
+  googleFolderId:
     required: false
     description: "google drive folder id"
   year:
@@ -31,14 +31,13 @@ inputs:
   skipChannels:
     required: false
     description: Array of channel id which should skip
-  outGsheet:
-    required: false
-    description: "output to google sheet"
-    default: "true"
-  outMarkdown:
-    required: false
-    description: "output to markdown"
-    default: "false"
+outputs:
+  jsonl_dir:
+    description: "directory containing raw slack messages in jsonl format"
+    value: ${{ steps.run-deno.outputs.jsonl_dir }}
+  md_dir:
+    description: "directory containing slack messages converted to markdown"
+    value: ${{ steps.run-deno.outputs.md_dir }}
 runs:
   using: composite
   steps:
@@ -46,7 +45,8 @@ runs:
       uses: denoland/setup-deno@27e0043effb637fb8409496e05bd8472e4b87554 #v2.0.2
       with:
         deno-version: v2.x
-    - name: Deno Run
+    - id: run-deno
+      name: Deno Run
       run: deno run -q -A ${{ github.action_path }}/src/action.ts
       shell: bash
       env:
@@ -54,10 +54,8 @@ runs:
         INPUT_GOOGLECLIENTEMAIL: ${{ inputs.googleClientEmail }}
         INPUT_GOOGLEPRIVATEKEY: ${{ inputs.googlePrivateKey }}
         INPUT_TIMEZONE: ${{ inputs.timezone }}
-        INPUT_FOLDERID: ${{ inputs.folderId }}
+        INPUT_GOOGLEFOLDERID: ${{ inputs.googleFolderId }}
         INPUT_YEAR: ${{ inputs.year }}
         INPUT_MONTH: ${{ inputs.month }}
         INPUT_AUTOJOIN: ${{ inputs.autoJoin }}
         INPUT_SKIPCHANNELS: ${{ inputs.skipChannels }}
-        INPUT_OUTGSHEET: ${{ inputs.outGsheet }}
-        INPUT_OUTMARKDOWN: ${{ inputs.outMarkdown }}

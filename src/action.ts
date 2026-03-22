@@ -30,6 +30,10 @@ core.notice(`start backing up ${from.year}/${from.month}`);
 const to = from.add({ months: 1 });
 
 main(new Date(from.epochMilliseconds), new Date(to.epochMilliseconds))
+  .then((res) => {
+    core.setOutput("jsonl_dir", res.jsonlDir);
+    core.setOutput("md_dir", res.mdDir);
+  })
   .catch((e) => {
     console.error(e);
     core.setFailed(`Action failed with error ${e}`);
