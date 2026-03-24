@@ -1,20 +1,10 @@
 Deno.env.set("TZ", "UTC");
 import settings from "./settings.ts";
-import { BatchBuilder } from "./lib/batchBuilder.ts";
-import {
-  channelsIt,
-  historyIt,
-  Message,
-  MessageProcessor,
-} from "./lib/slack.ts";
+import { channelsIt, historyIt, MessageProcessor } from "./lib/slack.ts";
 import { Timestamp } from "./lib/timestamp.ts";
-import {
-  formattedCell,
-  GSheet,
-  GSheetSchema,
-  sheets_v4,
-} from "./lib/google/sheet.ts";
-import { ObjError } from "./lib/objError.ts";
+import { saveToGsheet } from "./lib/googleSheetExporter.ts";
+import { saveToMarkdown } from "./lib/markdownExporter.ts";
+
 // Note: deno std lib fs/ensure_dir does not need to be imported if we use Deno.mkdir
 // But let's use standard Deno API directly
 const ensureDir = async (dir: string) => {
@@ -29,34 +19,12 @@ const ensureDir = async (dir: string) => {
   }
 };
 
-const sleep = (msec: number) => new Promise((ok) => setTimeout(ok, msec));
-
 // console.log without new line
 async function print(input: string | Uint8Array, to = Deno.stdout) {
   const stream = new Blob([
     typeof input === "string" ? input : input.buffer as ArrayBuffer,
   ]).stream();
   await stream.pipeTo(to.writable, { preventClose: true });
-}
-
-function msgToRow(msg: Message, p: MessageProcessor) {
-  const { ts, user, text, ...rest } = msg;
-  const threadMark = msg.reply_count ? "+" : msg.parent_user_id ? ">" : "";
-
-  try {
-    const row: sheets_v4.Schema$RowData = {
-      values: [
-        formattedCell(threadMark),
-        formattedCell(Timestamp.fromSlack(ts!)!, settings.tz),
-        formattedCell(p.username(user) || rest.username || ""),
-        formattedCell(p.readable(text) || rest.attachments?.[0].fallback || ""),
-        formattedCell(JSON.stringify(rest)),
-      ],
-    };
-    return row;
-  } catch (e) {
-    ObjError.throw(`${ts} ${user} ${text}`, e);
-  }
 }
 
 async function* ahead<T>(
@@ -133,66 +101,13 @@ export default async function main(
   if (
     settings.google.email && settings.google.key && settings.google.folderId
   ) {
-    console.log("Exporting to Google Sheets...");
-
-    // Google Sheets wants an array of sheet objects. Create from names.
-    const sheetsReq = GSheetSchema.sheetNames(
+    await saveToGsheet(
+      jsonlDir,
+      settings.google,
       settings.tz,
-      channels.map((c) => c.name),
+      oldest,
+      messageProcessor,
     );
-
-    const gSheet = await GSheet.create(
-      oldest.date(settings.tz),
-      sheetsReq,
-      settings.google.folderId,
-    );
-    console.log("https://docs.google.com/spreadsheets/d/" + gSheet.id);
-
-    const builder = new BatchBuilder();
-
-    async function flushAndSave() {
-      const batches = builder.flush();
-      if (batches.length == 0) return;
-      await gSheet.batchUpdate(batches).catch((e) => {
-        if (e.code == 429) {
-          console.error(e.errors);
-          Deno.exit(1);
-        } else throw e;
-      });
-    }
-
-    // Prepare sheets list and get ids
-    await gSheet.metaReload();
-
-    for (const c of channels) {
-      const sheetId = await gSheet.getSheetIdByName(c.name);
-      if (sheetId === undefined) continue;
-
-      builder.setSheetId(sheetId);
-
-      const filePath = `${jsonlDir}/${c.name}.jsonl`;
-      const data = await Deno.readTextFile(filePath);
-      const lines = data.split("\n").filter((l) => l.trim() !== "");
-
-      if (lines.length === 0) {
-        // No messages, optionally delete sheet
-        builder.pushDeleteSheet();
-        await flushAndSave();
-        continue;
-      }
-
-      console.log(`Writing ${c.name} to Sheet...`);
-      for (const line of lines) {
-        const msg = JSON.parse(line) as Message;
-        const row = msgToRow(msg, messageProcessor);
-        const estimate = builder.push(row);
-        if (estimate > 10000) {
-          await flushAndSave();
-          await sleep(1000);
-        }
-      }
-      await flushAndSave();
-    }
   } else {
     console.log(
       "Skipping Google Sheets export: missing credentials or folderId.",
@@ -200,38 +115,7 @@ export default async function main(
   }
 
   // 4. Write to Markdown (always execute)
-  console.log("Exporting to Markdown...");
-  for (const c of channels) {
-    const filePath = `${jsonlDir}/${c.name}.jsonl`;
-    const mdPath = `${mdDir}/${c.name}.md`;
-    const data = await Deno.readTextFile(filePath);
-    const lines = data.split("\n").filter((l) => l.trim() !== "");
-    if (lines.length === 0) continue;
-
-    console.log(`Writing ${c.name} to Markdown...`);
-    const mdFile = await Deno.open(mdPath, {
-      write: true,
-      create: true,
-      truncate: true,
-    });
-
-    for (const line of lines) {
-      const msg = JSON.parse(line) as Message;
-      const { ts, user, text, ...rest } = msg;
-      const threadMark = msg.reply_count ? "+" : msg.parent_user_id ? ">" : "";
-      const timeStr = Timestamp.fromSlack(ts!)!.date(settings.tz) + " " +
-        Timestamp.fromSlack(ts!)!.hourMin(settings.tz);
-      const username = messageProcessor.username(user) || rest.username ||
-        "Unknown";
-      const readableText = messageProcessor.readable(text) ||
-        rest.attachments?.[0].fallback || "";
-
-      const mdLine =
-        `**${username}** _${timeStr}_ ${threadMark}\n${readableText}\n\n`;
-      await mdFile.write(new TextEncoder().encode(mdLine));
-    }
-    mdFile.close();
-  }
+  await saveToMarkdown(jsonlDir, mdDir, messageProcessor, settings.tz);
 
   console.log("Done.");
   return { jsonlDir, mdDir };
