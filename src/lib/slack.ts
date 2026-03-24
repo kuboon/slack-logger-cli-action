@@ -76,17 +76,18 @@ export async function fetchHistory(
     const messages = res!.messages! || [];
 
     for (const msg of messages) {
-      allMessages.push(msg);
-
       if (msg.reply_count) {
         const reps = await fetchReplies(channel, msg.ts!);
-        allMessages.push(...reps);
+        // fetchReplies returns oldest->latest. Reverse so when the final array is reversed,
+        // it ends up oldest->latest after the parent.
+        allMessages.push(...reps.reverse());
       }
+      allMessages.push(msg);
     }
   } while (cursor);
 
-  // sort messages by ts (oldest to latest)
-  allMessages.sort((a, b) => parseFloat(a.ts!) - parseFloat(b.ts!));
+  // reverse messages to chronological order
+  allMessages.reverse();
 
   return allMessages;
 }
