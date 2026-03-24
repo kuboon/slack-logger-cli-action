@@ -1,4 +1,4 @@
-import { sheets_v4 } from "./google/sheet.ts";
+import { sheets_v4 } from "./sheet.ts";
 
 export class BatchBuilder {
   batches: sheets_v4.Schema$Request[] = [];

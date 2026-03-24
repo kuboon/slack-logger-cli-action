@@ -1,13 +1,9 @@
 import { BatchBuilder } from "./batchBuilder.ts";
-import { Message, MessageProcessor } from "./slack.ts";
-import { Timestamp } from "./timestamp.ts";
-import {
-  formattedCell,
-  GSheet,
-  GSheetSchema,
-  sheets_v4,
-} from "./google/sheet.ts";
-import { ObjError } from "./objError.ts";
+import { Message } from "../slack.ts";
+import { MessageProcessor } from "../slack/MessageProcessor.ts";
+import { Timestamp } from "../timestamp.ts";
+import { formattedCell, GSheet, GSheetSchema, sheets_v4 } from "./sheet.ts";
+import { ObjError } from "../objError.ts";
 
 const sleep = (msec: number) => new Promise((ok) => setTimeout(ok, msec));
 
@@ -41,10 +37,20 @@ export async function saveToGsheet(
   console.log("Exporting to Google Sheets...");
 
   // Read all JSONL files to determine the channels that need sheets.
-  const channels: string[] = [];
+  const channels: { id: string; name: string }[] = [];
   for await (const entry of Deno.readDir(jsonlDir)) {
     if (entry.isFile && entry.name.endsWith(".jsonl")) {
-      channels.push(entry.name.replace(".jsonl", ""));
+      const filePath = `${jsonlDir}/${entry.name}`;
+      const data = await Deno.readTextFile(filePath);
+      const lines = data.split("\n").filter((l) => l.trim() !== "");
+      if (lines.length > 0) {
+        const frontmatter = JSON.parse(lines[0]);
+        channels.push({
+          id: entry.name.replace(".jsonl", ""),
+          name: frontmatter.channel_name || frontmatter.name ||
+            entry.name.replace(".jsonl", ""),
+        });
+      }
     }
   }
 
@@ -53,9 +59,9 @@ export async function saveToGsheet(
     return;
   }
 
-  channels.sort();
+  channels.sort((a, b) => a.name.localeCompare(b.name));
 
-  const sheetsReq = GSheetSchema.sheetNames(tz, channels);
+  const sheetsReq = GSheetSchema.sheetNames(tz, channels.map((c) => c.name));
 
   const gSheet = await GSheet.create(
     oldest.date(tz),
@@ -79,26 +85,25 @@ export async function saveToGsheet(
 
   await gSheet.metaReload();
 
-  for (const channelName of channels) {
-    const sheetId = await gSheet.getSheetIdByName(channelName);
+  for (const c of channels) {
+    const sheetId = await gSheet.getSheetIdByName(c.name);
     if (sheetId === undefined) continue;
 
     builder.setSheetId(sheetId);
 
-    const filePath = `${jsonlDir}/${channelName}.jsonl`;
+    const filePath = `${jsonlDir}/${c.id}.jsonl`;
     const data = await Deno.readTextFile(filePath);
     const lines = data.split("\n").filter((l) => l.trim() !== "");
 
-    if (lines.length === 0) {
-      // No messages, optionally delete sheet
+    if (lines.length <= 1) { // Only frontmatter or empty
       builder.pushDeleteSheet();
       await flushAndSave();
       continue;
     }
 
-    console.log(`Writing ${channelName} to Sheet...`);
-    for (const line of lines) {
-      const msg = JSON.parse(line) as Message;
+    console.log(`Writing ${c.name} to Sheet...`);
+    for (let i = 1; i < lines.length; i++) {
+      const msg = JSON.parse(lines[i]) as Message;
       const row = msgToRow(msg, messageProcessor, tz);
       const estimate = builder.push(row);
       if (estimate > 10000) {

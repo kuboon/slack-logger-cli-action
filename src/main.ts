@@ -1,9 +1,10 @@
 Deno.env.set("TZ", "UTC");
 import settings from "./settings.ts";
-import { channelsIt, historyIt, MessageProcessor } from "./lib/slack.ts";
+import { channelsIt, fetchHistory } from "./lib/slack.ts";
 import { Timestamp } from "./lib/timestamp.ts";
-import { saveToGsheet } from "./lib/googleSheetExporter.ts";
+import { saveToGsheet } from "./lib/google/googleSheetExporter.ts";
 import { saveToMarkdown } from "./lib/markdownExporter.ts";
+import { MessageProcessor } from "./lib/slack/MessageProcessor.ts";
 
 // Note: deno std lib fs/ensure_dir does not need to be imported if we use Deno.mkdir
 // But let's use standard Deno API directly
@@ -27,19 +28,6 @@ async function print(input: string | Uint8Array, to = Deno.stdout) {
   await stream.pipeTo(to.writable, { preventClose: true });
 }
 
-async function* ahead<T>(
-  gen: AsyncGenerator<T, void, void>,
-): AsyncGenerator<{ msg: T; next?: T }, void, void> {
-  const r = await gen.next();
-  if (r.done) return;
-  let msg = r.value!;
-  for await (const next of gen) {
-    yield { msg, next };
-    msg = next!;
-  }
-  yield { msg };
-}
-
 export default async function main(
   oldest_: Date,
   latest_: Date,
@@ -49,16 +37,6 @@ export default async function main(
 
   const messageProcessor = await new MessageProcessor().asyncInit();
 
-  // 1. Fetch channels
-  const channels = [];
-  for await (const c of channelsIt()) {
-    channels.push({
-      name: c.name!,
-      channel_id: c.id!,
-    });
-  }
-  channels.sort((a, b) => a.name.localeCompare(b.name));
-
   const outDir = "./out";
   const jsonlDir = `${outDir}/jsonl`;
   const mdDir = `${outDir}/md`;
@@ -66,38 +44,35 @@ export default async function main(
   await ensureDir(jsonlDir);
   await ensureDir(mdDir);
 
-  // 2. Fetch logs and write to JSONL
   console.log("Fetching messages from Slack...");
-  for (const c of channels) {
+  for await (const c of channelsIt()) {
+    messageProcessor.addChannel({ id: c.id!, name: c.name! });
     console.log(`Channel: ${c.name}`);
-    const filePath = `${jsonlDir}/${c.name}.jsonl`;
+    const filePath = `${jsonlDir}/${c.id}.jsonl`;
     const file = await Deno.open(filePath, {
       write: true,
       create: true,
       truncate: true,
     });
 
-    // slack historyIt pagination goes from latest to oldest in general or as we saw,
-    // actually historyIt yields newest items then older items.
-    let count = 0;
-    for await (
-      const { msg } of ahead(
-        historyIt(c.channel_id, oldest.slack(), latest.slack()),
-      )
-    ) {
-      if (!msg) break;
+    const frontmatter = JSON.stringify({ channel_name: c.name }) + "\n";
+    await file.write(new TextEncoder().encode(frontmatter));
+
+    const messages = await fetchHistory(c.id!, oldest.slack(), latest.slack());
+
+    for (let i = 0; i < messages.length; i++) {
+      const msg = messages[i];
       const line = JSON.stringify(msg) + "\n";
       await file.write(new TextEncoder().encode(line));
-      count++;
-      if (count % 1000 === 0) {
+      if ((i + 1) % 1000 === 0) {
         await print(".");
       }
     }
+
     file.close();
-    console.log(` Saved ${count} messages.`);
+    console.log(` Saved ${messages.length} messages.`);
   }
 
-  // 3. Write to Google Sheets (if credentials are provided)
   if (
     settings.google.email && settings.google.key && settings.google.folderId
   ) {
@@ -114,7 +89,6 @@ export default async function main(
     );
   }
 
-  // 4. Write to Markdown (always execute)
   await saveToMarkdown(jsonlDir, mdDir, messageProcessor, settings.tz);
 
   console.log("Done.");
