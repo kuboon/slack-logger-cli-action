@@ -1,4 +1,4 @@
-import settings from "../settings.ts";
+import settings from "../../settings.ts";
 import { SlackAPIClient as WebClient } from "@seratch/slack-web-api-client";
 
 export const slack = new WebClient(settings.slack.token);

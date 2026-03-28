@@ -7,7 +7,7 @@ export default {
     key: Deno.env.get("INPUT_GOOGLEPRIVATEKEY") || "",
     folderId: Deno.env.get("INPUT_GOOGLEFOLDERID") || "",
   },
-  tz: Deno.env.get("INPUT_TIMEZONE")!,
+  tz: Deno.env.get("INPUT_TIMEZONE") || "Asia/Tokyo",
   year: Deno.env.get("INPUT_YEAR"),
   month: Deno.env.get("INPUT_MONTH"),
   autoJoin: Deno.env.get("INPUT_AUTOJOIN") !== "false",

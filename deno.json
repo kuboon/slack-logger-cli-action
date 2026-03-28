@@ -8,5 +8,18 @@
   },
   "unstable": [
     "temporal"
-  ]
+  ],
+  "permissions": {
+    "default": {
+      "env": {
+        "allow": ["INPUT_SLACKTOKEN"],
+        "ignore": true
+      },
+      "net": {
+        "allow": ["slack.com", "www.googleapis.com"]
+      },
+      "read": ["./out/"],
+      "write": ["./out/"]
+    }
+  }
 }

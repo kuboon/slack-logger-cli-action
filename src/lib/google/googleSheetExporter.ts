@@ -1,5 +1,5 @@
 import { BatchBuilder } from "./batchBuilder.ts";
-import { Message } from "../slack.ts";
+import { Message } from "../slack/slack.ts";
 import { MessageProcessor } from "../slack/MessageProcessor.ts";
 import { Timestamp } from "../timestamp.ts";
 import { formattedCell, GSheet, GSheetSchema, sheets_v4 } from "./sheet.ts";

@@ -1,4 +1,4 @@
-import { Message } from "./slack.ts";
+import { Message } from "./slack/slack.ts";
 import { MessageProcessor } from "./slack/MessageProcessor.ts";
 import { Timestamp } from "./timestamp.ts";
 
@@ -44,7 +44,7 @@ export async function saveToMarkdown(
         rest.attachments?.[0].fallback || "";
 
       const mdLine =
-        `**${username}** _${timeStr}_ ${threadMark}\n${readableText}\n\n`;
+        `_${timeStr}_ **${username}** ${threadMark}\n${readableText}\n\n`;
       await mdFile.write(new TextEncoder().encode(mdLine));
     }
     mdFile.close();

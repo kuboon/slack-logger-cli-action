@@ -1,4 +1,4 @@
-import { Member, slack } from "../slack.ts";
+import { Member, slack } from "../slack/slack.ts";
 
 const Regex = {
   user_id: /<@([^|>]+)(?:\|[^>]+)?>/g,
