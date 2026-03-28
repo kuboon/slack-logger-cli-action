@@ -1,108 +1,96 @@
 Deno.env.set("TZ", "UTC");
 import settings from "./settings.ts";
-import { StatusFile } from "./lib/statusFile.ts";
-import { BatchBuilder } from "./lib/batchBuilder.ts";
-import { historyIt, Message, MessageProcessor } from "./lib/slack.ts";
+import { channelsIt, fetchHistory } from "./lib/slack.ts";
 import { Timestamp } from "./lib/timestamp.ts";
-import { formattedCell, sheets_v4 } from "./lib/google/sheet.ts";
-import { ObjError } from "./lib/objError.ts";
+import { saveToGsheet } from "./lib/google/googleSheetExporter.ts";
+import { saveToMarkdown } from "./lib/markdownExporter.ts";
+import { MessageProcessor } from "./lib/slack/MessageProcessor.ts";
 
-const sleep = (msec: number) => new Promise((ok) => setTimeout(ok, msec));
+// Note: deno std lib fs/ensure_dir does not need to be imported if we use Deno.mkdir
+// But let's use standard Deno API directly
+const ensureDir = async (dir: string) => {
+  try {
+    await Deno.stat(dir);
+  } catch (e) {
+    if (e instanceof Deno.errors.NotFound) {
+      await Deno.mkdir(dir, { recursive: true });
+    } else {
+      throw e;
+    }
+  }
+};
 
 // console.log without new line
 async function print(input: string | Uint8Array, to = Deno.stdout) {
-  const stream = new Blob([input]).stream();
+  const stream = new Blob([
+    typeof input === "string" ? input : input.buffer as ArrayBuffer,
+  ]).stream();
   await stream.pipeTo(to.writable, { preventClose: true });
 }
 
-function msgToRow(msg: Message, p: MessageProcessor) {
-  const { ts, user, text, ...rest } = msg;
-  const threadMark = msg.reply_count ? "+" : msg.parent_user_id ? ">" : "";
-
-  try {
-    const row: sheets_v4.Schema$RowData = {
-      values: [
-        formattedCell(threadMark),
-        formattedCell(Timestamp.fromSlack(ts!)!, settings.tz),
-        formattedCell(p.username(user) || rest.username || ""),
-        formattedCell(p.readable(text) || rest.attachments?.[0].fallback || ""),
-        formattedCell(JSON.stringify(rest)),
-      ],
-    };
-    return row;
-  } catch (e) {
-    ObjError.throw(`${ts} ${user} ${text}`, e);
-  }
-}
-
-async function* ahead<T>(
-  gen: AsyncGenerator<T, void, void>,
-): AsyncGenerator<{ msg: T; next?: T }, void, void> {
-  let msg = (await gen.next()).value!;
-  for await (const next of gen) {
-    yield { msg, next };
-    msg = next!;
-  }
-  yield { msg };
-}
 export default async function main(
-  append = false,
   oldest_: Date,
   latest_: Date,
 ) {
   const oldest = new Timestamp(oldest_);
   const latest = new Timestamp(latest_);
-  const file = new StatusFile();
-  const { gSheet } = await file.prepare(append, oldest);
-  await file.save();
-  console.log("https://docs.google.com/spreadsheets/d/" + gSheet.id);
 
-  const builder = new BatchBuilder();
   const messageProcessor = await new MessageProcessor().asyncInit();
-  const tsRecord: Record<string, string> = {};
-  async function flushAndSave() {
-    const batches = builder.flush();
-    if (batches.length == 0) return;
-    await gSheet.batchUpdate(batches).catch((e) => {
-      if (e.code == 429) {
-        console.error(e.errors);
-        Deno.exit(1);
-      } else throw e;
-    });
-    for (const id in tsRecord) {
-      const c = file.status.channels.find((x) => x.channel_id == id)!;
-      c.ts = tsRecord[id];
-    }
-    await file.save();
-  }
-  for await (const c of file.status.channels) {
-    console.log(c.name);
-    builder.setSheetId(c.sheetId!);
-    for await (
-      const { msg, next } of ahead(
-        historyIt(c.channel_id, c.ts, latest.slack()),
-      )
-    ) {
-      if (!msg) {
-        builder.pushDeleteSheet();
-        await print(" x");
-        break;
-      }
-      const row = msgToRow(msg, messageProcessor);
-      const estimate = builder.push(row);
-      if (!next) {
-        tsRecord[c.channel_id] = msg.ts!;
-      }
-      if (estimate > 10000 && (!next || !next.parent_user_id)) {
-        await print(".");
-        tsRecord[c.channel_id] = msg.ts!;
-        await flushAndSave();
 
-        // https://developers.google.com/sheets/api/reference/limits
-        await sleep(1000);
+  const outDir = "./out";
+  const jsonlDir = `${outDir}/jsonl`;
+  const mdDir = `${outDir}/md`;
+
+  await ensureDir(jsonlDir);
+  await ensureDir(mdDir);
+
+  console.log("Fetching messages from Slack...");
+  for await (const c of channelsIt()) {
+    messageProcessor.addChannel({ id: c.id!, name: c.name! });
+    console.log(`Channel: ${c.name}`);
+    const filePath = `${jsonlDir}/${c.id}.jsonl`;
+    const file = await Deno.open(filePath, {
+      write: true,
+      create: true,
+      truncate: true,
+    });
+
+    const frontmatter = JSON.stringify({ channel_name: c.name }) + "\n";
+    await file.write(new TextEncoder().encode(frontmatter));
+
+    const messages = await fetchHistory(c.id!, oldest.slack(), latest.slack());
+
+    for (let i = 0; i < messages.length; i++) {
+      const msg = messages[i];
+      const line = JSON.stringify(msg) + "\n";
+      await file.write(new TextEncoder().encode(line));
+      if ((i + 1) % 1000 === 0) {
+        await print(".");
       }
     }
-    console.log("");
+
+    file.close();
+    console.log(` Saved ${messages.length} messages.`);
   }
-  await flushAndSave();
+
+  if (
+    settings.google.email && settings.google.key && settings.google.folderId
+  ) {
+    await saveToGsheet(
+      jsonlDir,
+      settings.google,
+      settings.tz,
+      oldest,
+      messageProcessor,
+    );
+  } else {
+    console.log(
+      "Skipping Google Sheets export: missing credentials or folderId.",
+    );
+  }
+
+  await saveToMarkdown(jsonlDir, mdDir, messageProcessor, settings.tz);
+
+  console.log("Done.");
+  return { jsonlDir, mdDir };
 }

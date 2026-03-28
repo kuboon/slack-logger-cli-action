@@ -1,7 +1,15 @@
 import settings from "../settings.ts";
 import { SlackAPIClient as WebClient } from "@seratch/slack-web-api-client";
 
-const slack = new WebClient(settings.slack.token);
+export const slack = new WebClient(settings.slack.token);
+
+export type Member = NonNullable<
+  Awaited<ReturnType<typeof slack.users.list>>["members"]
+>[number];
+
+export type Message = NonNullable<
+  Awaited<ReturnType<typeof slack.conversations.history>>["messages"]
+>[number];
 
 export async function* channelsIt() {
   let cursor: string | undefined;
@@ -25,110 +33,61 @@ export async function* channelsIt() {
     }
   } while (cursor);
 }
-export type Message = NonNullable<
-  Awaited<ReturnType<typeof slack.conversations.history>>["messages"]
->[number];
 
-export async function* historyIt(
+export async function fetchReplies(
   channel: string,
-  oldest: string,
-  latest?: string,
-): AsyncGenerator<Message, void, void> {
+  ts: string,
+): Promise<Message[]> {
+  const messages: Message[] = [];
   let cursor: string | undefined;
   do {
-    // passing latest causes pagination from latest to oldest
-    const res = await slack.conversations.history({
-      channel,
-      cursor,
-      oldest,
-      // latest
-    });
-    cursor = res!.response_metadata?.next_cursor;
-    const messages = res!.messages!;
-
-    // api response always ordered from latest to oldest unless latest is null
-    // we should return oldest first
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const msg = messages[i];
-      if (latest && parseFloat(latest) < parseFloat(msg.ts!)) {
-        cursor = undefined;
-        break;
-      }
-      // should check responses
-      yield msg;
-      if (msg.reply_count) {
-        yield* replies(channel, msg.ts!);
-      }
-    }
-  } while (cursor);
-}
-async function* replies(channel: string, ts: string) {
-  let cursor: string | undefined;
-  do {
-    // passing latest causes pagination from latest to oldest
     const res = await slack.conversations.replies({
       channel,
       cursor,
       ts,
     });
     cursor = res!.response_metadata?.next_cursor;
-    const messages = res!.messages!;
-    for (const m of messages) {
-      if (m.ts != ts) yield m;
+    const resMessages = res!.messages! || [];
+    for (const m of resMessages) {
+      if (m.ts !== ts) {
+        messages.push(m);
+      }
     }
   } while (cursor);
+  return messages;
 }
-const Regex = {
-  user_id: /<@([^|>]+)(?:\|[^>]+)?>/g,
-  group_id: /<!subteam\^([^|>]+)(?:\|[^>]+)?>/g,
-  channel_id: /<#([^|>]+)(?:\|[^>]+)?>/g,
-  specials: /<!([^^|>]+)>/g,
-};
-function unescape(str: string) {
-  return str
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">");
-}
-export type Member = NonNullable<
-  Awaited<ReturnType<typeof slack.users.list>>["members"]
->[number];
-async function users() {
-  const res = await slack.users.list();
-  return res.members!;
-}
-export class MessageProcessor {
-  users: Member[];
-  groups: { id: string; name: string }[];
-  channels: { id: string; name: string }[];
-  constructor() {
-    this.users = [];
-    this.groups = [];
-    this.channels = [];
-  }
-  async asyncInit() {
-    this.users = await users();
-    return this;
-  }
-  readable(raw: string | undefined) {
-    if (!raw || raw == "") return;
-    const ret = raw.replaceAll(Regex.user_id, (_, s1) => {
-      const user = this.users.find((x) => x.id == s1);
-      return `@${user?.name || s1}`;
-    }).replaceAll(Regex.group_id, (_, s1) => {
-      const hit = this.groups.find((x) => x.id == s1);
-      return `@${hit?.name || s1}`;
-    }).replaceAll(Regex.channel_id, (_, s1) => {
-      const hit = this.channels.find((x) => x.id == s1);
-      return `@${hit?.name || s1}`;
-    }).replaceAll(Regex.specials, (_, s1) => {
-      return `@${s1}`;
+
+export async function fetchHistory(
+  channel: string,
+  oldest: string,
+  latest: string,
+): Promise<Message[]> {
+  const allMessages: Message[] = [];
+  let cursor: string | undefined;
+
+  do {
+    const res = await slack.conversations.history({
+      channel,
+      cursor,
+      oldest,
+      latest,
     });
-    return unescape(ret);
-  }
-  username(id?: string) {
-    if (!id) return;
-    const user = this.users.find((x) => x.id == id);
-    return user?.real_name || user?.name || id;
-  }
+    cursor = res!.response_metadata?.next_cursor;
+    const messages = res!.messages! || [];
+
+    for (const msg of messages) {
+      if (msg.reply_count) {
+        const reps = await fetchReplies(channel, msg.ts!);
+        // fetchReplies returns oldest->latest. Reverse so when the final array is reversed,
+        // it ends up oldest->latest after the parent.
+        allMessages.push(...reps.reverse());
+      }
+      allMessages.push(msg);
+    }
+  } while (cursor);
+
+  // reverse messages to chronological order
+  allMessages.reverse();
+
+  return allMessages;
 }
