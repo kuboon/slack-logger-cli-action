@@ -3,7 +3,7 @@
 // inside slack.ts is initialised via the dynamic import below.
 import { createEmulator, type Emulator } from "emulate";
 import { SlackAPIClient } from "@seratch/slack-web-api-client";
-import { assertEquals } from "@std/assert";
+import { assertEquals, assert } from "@std/assert";
 
 const slackEmulator: Emulator = await createEmulator({
   service: "slack",
@@ -53,9 +53,8 @@ Deno.test({
       );
       const lines = jsonlContent.split("\n").filter((l) => l.trim());
       // First line is frontmatter JSON, remaining lines are messages.
-      assertEquals(
+      assert(
         lines.length >= 3,
-        true,
         "Should have frontmatter + 2 messages",
       );
 
@@ -89,9 +88,8 @@ Deno.test({
       const mdContent = await Deno.readTextFile(
         `${result.mdDir}/general.md`,
       );
-      assertEquals(
+      assert(
         mdContent.includes("Markdown content test"),
-        true,
         "Markdown file should contain the posted message",
       );
     } finally {
