@@ -45,33 +45,33 @@ export default async function main(
   await ensureDir(mdDir);
 
   console.log("Fetching messages from Slack...");
-  // for await (const c of channelsIt()) {
-  //   messageProcessor.addChannel({ id: c.id!, name: c.name! });
-  //   console.log(`Channel: ${c.name}`);
-  //   const filePath = `${jsonlDir}/${c.id}.jsonl`;
-  //   const file = await Deno.open(filePath, {
-  //     write: true,
-  //     create: true,
-  //     truncate: true,
-  //   });
+  for await (const c of channelsIt()) {
+    messageProcessor.addChannel({ id: c.id!, name: c.name! });
+    console.log(`Channel: ${c.name}`);
+    const filePath = `${jsonlDir}/${c.id}.jsonl`;
+    const file = await Deno.open(filePath, {
+      write: true,
+      create: true,
+      truncate: true,
+    });
 
-  //   const frontmatter = JSON.stringify({ channel_name: c.name }) + "\n";
-  //   await file.write(new TextEncoder().encode(frontmatter));
+    const frontmatter = JSON.stringify({ channel_name: c.name }) + "\n";
+    await file.write(new TextEncoder().encode(frontmatter));
 
-  //   const messages = await fetchHistory(c.id!, oldest.slack(), latest.slack());
+    const messages = await fetchHistory(c.id!, oldest.slack(), latest.slack());
 
-  //   for (let i = 0; i < messages.length; i++) {
-  //     const msg = messages[i];
-  //     const line = JSON.stringify(msg) + "\n";
-  //     await file.write(new TextEncoder().encode(line));
-  //     if ((i + 1) % 1000 === 0) {
-  //       await print(".");
-  //     }
-  //   }
+    for (let i = 0; i < messages.length; i++) {
+      const msg = messages[i];
+      const line = JSON.stringify(msg) + "\n";
+      await file.write(new TextEncoder().encode(line));
+      if ((i + 1) % 1000 === 0) {
+        await print(".");
+      }
+    }
 
-  //   file.close();
-  //   console.log(` Saved ${messages.length} messages.`);
-  // }
+    file.close();
+    console.log(` Saved ${messages.length} messages.`);
+  }
 
   if (
     settings.google.email && settings.google.key && settings.google.folderId

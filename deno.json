@@ -3,8 +3,13 @@
     "@actions/core": "npm:@actions/core@^1.11.1",
     "@seratch/slack-web-api-client": "jsr:@seratch/slack-web-api-client@^1.1.5",
     "@slack/types": "npm:@slack/types@^2.14.0",
+    "@std/assert": "jsr:@std/assert@^1.0.0",
+    "emulate": "npm:emulate@^0.4.1",
     "google-auth-library": "npm:google-auth-library@^9.15.1",
     "googleapis": "npm:googleapis@^148.0.0"
+  },
+  "tasks": {
+    "test": "deno test --allow-all --unstable-temporal src/"
   },
   "unstable": [
     "temporal"
@@ -12,7 +17,7 @@
   "permissions": {
     "default": {
       "env": {
-        "allow": ["INPUT_SLACKTOKEN"],
+        "allow": ["INPUT_SLACKTOKEN", "SLACK_BASE_URL"],
         "ignore": true
       },
       "net": {
