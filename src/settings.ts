@@ -1,6 +1,7 @@
 export default {
   slack: {
     token: Deno.env.get("INPUT_SLACKTOKEN")!,
+    baseUrl: Deno.env.get("SLACK_BASE_URL"),
   },
   google: {
     email: Deno.env.get("INPUT_GOOGLECLIENTEMAIL") || "",

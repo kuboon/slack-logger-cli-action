@@ -1,7 +1,9 @@
 import settings from "../../settings.ts";
 import { SlackAPIClient as WebClient } from "@seratch/slack-web-api-client";
 
-export const slack = new WebClient(settings.slack.token);
+export const slack = new WebClient(settings.slack.token, {
+  baseUrl: settings.slack.baseUrl,
+});
 
 export type Member = NonNullable<
   Awaited<ReturnType<typeof slack.users.list>>["members"]
